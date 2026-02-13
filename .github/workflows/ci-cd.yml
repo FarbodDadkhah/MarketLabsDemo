@@ -1,0 +1,139 @@
+# .github/workflows/ci-cd.yml
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/documind
+
+jobs:
+  # ──────────────────────────────────────────────
+  # Job 1: Code Quality
+  # ──────────────────────────────────────────────
+  lint:
+    name: Code Quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dev dependencies
+        run: pip install ruff mypy
+
+      - name: Lint (ruff)
+        run: ruff check src/ tests/
+
+      - name: Format check (ruff)
+        run: ruff format --check src/ tests/
+
+      - name: Type check (mypy)
+        run: mypy src/ --ignore-missing-imports
+
+  # ──────────────────────────────────────────────
+  # Job 2: Tests
+  # ──────────────────────────────────────────────
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: documind_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install ".[dev]"
+
+      - name: Run tests with coverage
+        run: pytest tests/ -v --tb=short
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/documind_test
+
+  # ──────────────────────────────────────────────
+  # Job 3: Build & Push Docker Image
+  # ──────────────────────────────────────────────
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────
+  # Job 4: Deploy to Staging
+  # ──────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+
+    steps:
+      - name: Deploy to staging
+        run: |
+          # Option A: Kubernetes
+          kubectl set image deployment/documind \
+            documind=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            --namespace staging
+
+          # Option B: AWS ECS (alternative)
+          # aws ecs update-service --cluster staging \
+          #   --service documind \
+          #   --force-new-deployment
+
+      - name: Verify deployment health
+        run: |
+          # Wait for rollout to complete
+          kubectl rollout status deployment/documind --namespace staging --timeout=300s
+
+      - name: Smoke test
+        run: |
+          # Hit the health endpoint to verify the deployment
+          curl -f https://staging.documind.io/health || exit 1

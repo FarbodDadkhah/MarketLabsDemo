@@ -7,16 +7,23 @@ AI-powered contract analysis service: upload legal documents, extract clauses vi
 - Python 3.11+
 - Docker and Docker Compose (for full-stack setup)
 
-## Setup
-
-### 1. Configure environment
+## Quick Start
 
 ```bash
-cp .env.example .env
-# Edit .env to add your AI_API_KEY (optional — health endpoint works without it)
+git clone <repo-url>
+cd code_deliverables
+cp .env.example .env        # then add your Anthropic API key
+pip install -e "."
+python demo.py sample_contract.txt
 ```
 
-### 2. Run tests (no Docker needed)
+This reads the bundled sample SaaS agreement, sends it to Claude, and prints extracted clauses with risk levels.
+
+**PDF support (optional):** `pip install -e ".[pdf]"` then `python demo.py my_lease.pdf`
+
+## Development
+
+### Run tests (no Docker needed)
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -24,7 +31,7 @@ pip install -e ".[dev]"
 pytest tests/ -v
 ```
 
-### 3. Run the full stack with Docker Compose
+### Run the full stack with Docker Compose
 
 ```bash
 docker compose up --build -d
@@ -36,14 +43,14 @@ This starts PostgreSQL, Redis, and the app. Wait for all services to become heal
 docker compose ps
 ```
 
-### 4. Verify
+### Verify
 
 ```bash
 curl http://localhost:8000/health
 # → {"status":"ok"}
 ```
 
-### 5. Shut down
+### Shut down
 
 ```bash
 docker compose down
@@ -57,7 +64,7 @@ docker compose down
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection string |
 | `AI_API_KEY` | *(empty)* | API key for the AI provider (optional for local dev) |
 | `AI_PROVIDER` | `anthropic` | AI provider (`anthropic` or `openai`) |
-| `AI_MODEL` | `claude-sonnet-4-5-20250514` | Model to use for clause extraction |
+| `AI_MODEL` | `claude-sonnet-4-5-20250929` | Model to use for clause extraction |
 | `MAX_FILE_SIZE_MB` | `50` | Maximum upload file size in MB |
 
 ## What this codebase demonstrates
@@ -73,6 +80,8 @@ docker compose down
 ## Project Structure
 
 ```
+demo.py                        # One-command AI contract analysis demo
+sample_contract.txt            # Sample SaaS agreement for demo
 src/
 ├── api/
 │   └── __init__.py            # FastAPI app + /health endpoint
@@ -107,3 +116,4 @@ tests/
 | 3.3 | `src/prompts/`, `src/prompts/schemas.py`, `tests/test_prompt_validation.py` | AI prompt engineering, JSON response validation, Pydantic schemas |
 | 4.1 | `Dockerfile`, `.github/workflows/ci-cd.yml` | Multi-stage Docker build, CI/CD pipeline (lint → test → build → deploy) |
 | 5.1c | `src/workers/worker.py` | Worker pseudocode: dedup, distributed lock, graceful shutdown |
+| Demo | `demo.py`, `sample_contract.txt` | End-to-end AI analysis demo: read file, call AI, display results |
